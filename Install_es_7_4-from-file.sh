@@ -21,6 +21,7 @@
 #	* Create .repo file for elasticsearch packages
 #	* Install Elastic Search 7.4
 #	* Add all elasticsearch nodes to /etc/hosts.
+#	* Create an LVM mount from a specified disk for the elasticsearch data directory.
 #	* Edit the elasticsearch.yml file.
 #	* Starting elasticsearch and making it starts on boot.
 #	* Open ports 9200 9300 from all other nodes.
@@ -40,6 +41,18 @@
 # 10 - Failed to reload firewall changes.
 # 11 - Failed to create the elasticsearch repo file.
 # 12 - Failed to create a file.
+# 13 - Failed to create a partition.
+# 14 - Physical volume (PV) creation failed.
+# 15 - Volume Group (VG) already exists.
+# 16 - Volume group (VG) creation failed.
+# 17 - Logical volume (LV) already exists.
+# 18 - Logical volume (LV) creation failed.
+# 19 - Failed to create a file system.
+# 20 - Data directory path already exists.
+# 21 - Failed to create a directory.
+# 22 - Failed to change owner (of a file / directory).
+# 23 - Failed to edit the /etc/fstab.
+# 24 - Failed to mount.
 
 ##############################################################
 
@@ -52,6 +65,12 @@ declare is_data_node=true
 # Variables for the nodes information.
 declare cluster_name='es-cluster'
 declare servers_info_file_path='/tmp/es-nodes-list.txt'	# List of all nodes in the format '<server_name> <server_ip>'
+
+# Variable for the data disk.
+declare data_disk_path='/dev/sdc'
+declare data_dir_path='/mnt/data'
+declare vg_data_name='VolGroup-Data'
+declare lv_data_name='LogVol-Data'
 
 ######	You can change this variables section - End	   #######
 
@@ -79,6 +98,16 @@ function echo_success()
 message=$1
 /bin/echo -e "${GREEN}$message${NOCOLOR}"
 }
+
+function echo_fail_wipe_message()
+{
+echo_fail "----------------------------------------------------"
+echo_fail "The script is not wiping the data disk. you can do it manually by using the command."
+echo_fail "dd if=/dev/zero of=<disk_path> bs=1 count=512"
+echo_fail "Use it carefully!!! This command can not be reversed."
+echo_fail "----------------------------------------------------"
+}
+
 
 # Cleaning function.
 function clean_temp_files()
@@ -199,11 +228,149 @@ if [ $? -ne 0 ]; then
         exit 6
 fi
 
+## Creating the data mount directory.
+# Create a partition on the data disk.
+/bin/echo -e "n\np\n\n\n\nt\n8e\nw" | /sbin/fdisk $data_disk_path
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to create a partition on the disk: '$data_disk_path'."
+	# Clean.
+	clean
+	exit 13
+fi
+/sbin/partx -av /dev/sdc &>/dev/null
+
+# Create the physical volume.
+pvcreate ${data_disk_path}1
+if [ $? -ne 0 ]; then
+	echo_fail "PV creation failed."
+	# Clean.
+	clean
+	exit 14
+fi
+
+# Check if the volume group already exists.
+all_vg_names=$(vgs --noheading | /bin/awk {'print $1'})
+if echo $all_vg_names | grep -q $vg_data_name; then
+		echo_fail "The volume group named $vg_data_name already exists."
+		echo_fail_wipe_message
+		
+		# Clean.
+		clean
+		exit 15
+fi
+# Create the volume group.
+vgcreate $vg_data_name ${data_disk_path}1
+if [ $? -ne 0 ]; then
+	echo_fail "VG creation failed"
+	echo_fail_wipe_message
+	
+	# Clean.
+	clean
+	exit 16	
+fi
+
+# Check if the logical volume already exists.
+all_lv_names=$(lvs --noheading | /bin/awk {'print $1'})
+if echo $all_lv_name | grep -q $lv_data_name; then
+	echo_fail "The logical volume named $lv_data_name already exists."
+	echo_fail_wipe_message
+	
+	# Clean.
+	clean
+	exit 17
+fi
+lvcreate -l 100%free -n $lv_data_name $vg_data_name
+if [ $? -ne 0 ]; then
+	echo_fail "LV creation failed"
+	echo_fail_wipe_message
+	
+	# Clean.
+	clean
+	exit 18	
+fi
+
+# Create a file system on the LV.
+mkfs.xfs /dev/VolGroup-Data/LogVol-Data
+if [ $? -ne 0 ]; then
+	echo_fail "The creation of a xfs file system on the LV failed."
+	echo_fail_wipe_message
+	
+	# Clean.
+	clean
+	exit 19	
+fi
+
+# Create the mount directory and give elasticsearch user owner.
+# Check if the data directory exists.
+if [ -e $data_dir_path ]; then
+	# Check if its directory.
+	echo_fail "The '$data_dir_path' already exists."
+	echo_fail_wipe_message
+	
+	# Clean.
+	clean
+	exit 20
+fi
+
+mkdir $data_dir_path
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to create the directory '$data_dir_path'."
+	echo_fail_wipe_message
+	
+	# Clean.
+	clean
+	exit 21
+fi
+
+chown elasticsearch:elasticsearch $data_dir_path
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to change the owner of the $data_dir_path directory to elasticsearch:elasticseach."
+	echo_fail "Please make sure that the user and group named 'elasticsearch' exists."
+	echo_fail_wipe_message
+	
+	# Clean.
+	clean
+	exit 22
+fi
+
+## Adding the data mount to the /etc/fstab
+# Backing up the /etc/fstab file.
+cp /etc/fstab /opt/AfikArbiv_fstab_backup
+
+echo -e "/dev/$vg_data_name/$lv_data_name\t$data_dir_path\txfs\tdefaults\t0 0" >> /etc/fstab
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to add the data mount to the /etc/fstab."
+	echo_fail_wipe_message
+	
+	# Restore the /etc/fstab file.
+	mv -f /opt/AfikArbiv_fstab_backup /etc/fstab
+		
+	# Clean.
+	clean
+	exit 23
+fi
+
+# Removing the backup /etc/fstab file.
+rm -f /opt/AfikArbiv_fstab_backup
+
+# Mount the data directory.
+mount $data_dir_path
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to mount '$data_dir_path' data mount."
+	echo_fail_wipe_message
+		
+	# Clean.
+	clean
+	exit 24
+fi
+
 ## Editing the elasticsearch.yml configuration.
 # Replacing the lines with the willing content.
 sed -i "/node.name: node-1/c\node.name: $HOSTNAME" /etc/elasticsearch/elasticsearch.yml
 sed -i "/cluster.name: my-application/c\cluster.name: $cluster_name" /etc/elasticsearch/elasticsearch.yml
 sed -i "/network.host: 192.168.0.1/c\network.host: [\"$HOSTNAME\", \"localhost\"]" /etc/elasticsearch/elasticsearch.yml
+# Replace the path.data with the data directory we created.
+sed -i "/path.data:/c\path.data: $data_dir_path" /etc/elasticsearch/elasticsearch.yml
 
 # Adding the 'node.master' and 'node.data' params to the yaml file.
 if [ "$is_master_eligible" = true ]; then
