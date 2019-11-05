@@ -4,19 +4,22 @@ Install-Module AzureRM -AllowClobber -Scope AllUsers
 # Prompt for user and password.
 Connect-AzureRMAccount
 
-# Parameters.
+##############    Variables Definition - Start    ##############
+
+# Create variables to store the location and the resource group name.
 $resourceGroupName = 'AfikArviv'
 $location = 'northeurope'
 
+# Create the variables for the load balancer.
 $lbPublicIPName = 'lb-es-pip'
 $lbFrontendIPName = 'lb-fe-ip'
 $backendPoolName = 'lb-be-pool'
 $healthProbeName = 'lb-probe'
 $lbRestRuleName = 'lb-es-rest-rule'
 $lbNodeRuleName = 'lb-es-node-rule'
-$lbNodeHttpName = 'lb-es-http-rule'
+$lbHttpRuleName = 'lb-es-http-rule'
 
-$esLBName = 'es-lb'
+$lbName = 'es-lb'
 
 $vNetName = 'afikVNet'
 # The following parameters only needed for new vNet.
@@ -24,6 +27,7 @@ $vNetAddressPrefix = '10.0.0.0/16'
 $subnetName = 'afikSubnet'
 $subnetAddressPrefix = '10.0.0.0/24'
 
+###############    Variables Definition - End    ###############
 
 ## Creating a virtual network (or using an existing).
 # Check if the vNet already exists.
@@ -89,13 +93,13 @@ $lbRestRule = New-AzureRmLoadBalancerRuleConfig `
 
 # Create a load balancer.
 # Check if there is a load balancer with that name.
-if (Get-AzureRmLoadBalancer -ResourceGroupName $resourceGroupName | Where-Object { $_.Name -eq $esLBName}){
+if (Get-AzureRmLoadBalancer -ResourceGroupName $resourceGroupName | Where-Object { $_.Name -eq $lbName}){
     Write-Host "The load balancer with that name already exists."
 }else{
     # Create a new load balancer.
     $eslb = New-AzureRmLoadBalancer `
       -ResourceGroupName $resourceGroupName `
-      -Name $esLBName `
+      -Name $lbName `
       -Location $location `
       -FrontendIpConfiguration $lbFrontendIP `
       -BackendAddressPool $backendPool `
@@ -116,7 +120,7 @@ $eslb | Add-AzureRmLoadBalancerRuleConfig `
 
 # Add a load balancer rule for the http mmunication.
 $eslb | Add-AzureRmLoadBalancerRuleConfig `
-  -Name $lbNodeHttpName `
+  -Name $lbHttpRuleName `
   -FrontendIpConfiguration $lbFrontendIP `
   -BackendAddressPool $backendPool `
   -Protocol Tcp `
