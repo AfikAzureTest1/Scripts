@@ -53,6 +53,9 @@
 # 22 - Failed to change owner (of a file / directory).
 # 23 - Failed to edit the /etc/fstab.
 # 24 - Failed to mount.
+# 25 - Failed to install httpd.
+# 26 - Failed to start httpd.
+# 27 - Failed to enable httpd to start automatically on boot.
 
 ##############################################################
 
@@ -71,6 +74,9 @@ declare data_disk_path='/dev/sdc'
 declare data_dir_path='/mnt/data'
 declare vg_data_name='VolGroup-Data'
 declare lv_data_name='LogVol-Data'
+
+# Variable for the load balancer probe configuration.
+declare probe_file_name='healthcheck.aspx'
 
 ######	You can change this variables section - End	   #######
 
@@ -506,3 +512,64 @@ fi
 clean_temp_files
 
 echo_success "The ElasticSearch installation script finished successfully. Enjoy :)"
+
+## Create web path for the health probe of the load balancer.
+# Install httpd rpm.
+yum install httpd -y
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to install httpd rpm."
+	exit 25
+fi
+
+# Create the web file for the load balancer probe check.
+if [ -e /var/www/html/$probe_file_name  ]; then
+        echo_log "healthcheck.aspx already exists. Continue."
+else
+        echo "I am server $HOSTNAME" > /var/www/html/$probe_file_name
+		if [ $? -ne 0 ]; then
+			echo_fail "Failed to create the healthcheck file."
+			exit 12
+		fi
+fi
+
+# Starting Elasticsearch and make it start automatically on boot.
+systemctl start httpd
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to start httpd." 
+	exit 26
+fi
+
+systemctl enable httpd
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to enable httpd start on boot."
+	exit 27
+	
+fi
+
+## Add firewall rule.
+# Check if the local firewall is active.
+if systemctl status firewalld.service | grep -q 'dead' ; then
+	echo_log "The firewalld.service is down. No need to open ports."
+else
+	firewall-cmd --permanent --add-port=80/tcp
+	if [ $? -ne 0 ]; then
+		echo_fail "-----------------------------------------------------------"
+		echo_fail "Failed to create firewall rule for port 80."
+		echo_fail "Please create this rule manually after this script is done."
+		echo_fail "-----------------------------------------------------------"
+		exit 9
+	fi
+	
+	# Reload firewall configuration.
+	firewall-cmd --reload
+	if [ $? -ne 0 ]; then
+		echo_fail "Failed to reload firewall changes."
+		echo_fail "Please check for the reason and update the firewall configuration manually."
+		
+		# Clean
+		clean_temp_files
+		exit 10
+	fi
+fi
+
+echo_success "Succesfully created the $probe_file_name for the load balancer. Enjoy :)"
