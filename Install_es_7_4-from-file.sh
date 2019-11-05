@@ -322,17 +322,6 @@ if [ $? -ne 0 ]; then
 	exit 21
 fi
 
-chown elasticsearch:elasticsearch $data_dir_path
-if [ $? -ne 0 ]; then
-	echo_fail "Failed to change the owner of the $data_dir_path directory to elasticsearch:elasticseach."
-	echo_fail "Please make sure that the user and group named 'elasticsearch' exists."
-	echo_fail_wipe_message
-	
-	# Clean.
-	clean
-	exit 22
-fi
-
 ## Adding the data mount to the /etc/fstab
 # Backing up the /etc/fstab file.
 cp /etc/fstab /opt/AfikArbiv_fstab_backup
@@ -362,6 +351,17 @@ if [ $? -ne 0 ]; then
 	# Clean.
 	clean
 	exit 24
+fi
+
+chown elasticsearch:elasticsearch $data_dir_path
+if [ $? -ne 0 ]; then
+	echo_fail "Failed to change the owner of the $data_dir_path directory to elasticsearch:elasticseach."
+	echo_fail "Please make sure that the user and group named 'elasticsearch' exists."
+	echo_fail_wipe_message
+	
+	# Clean.
+	clean
+	exit 22
 fi
 
 ## Editing the elasticsearch.yml configuration.
