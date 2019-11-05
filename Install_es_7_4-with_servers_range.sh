@@ -58,9 +58,9 @@
 
 # Variables for the nodes information.
 declare cluster_name='es-cluster'
-declare node_name_convention='es-master-'
-declare node_ip_convention='1.1.1.'
-declare node_last_number_ip_begin=1	# The last number in the IP of the first node in the range (assuming all IP are in sequence).
+declare node_name_convention='es-c77-m-'
+declare node_ip_convention='10.0.0.'
+declare node_last_number_ip_begin=4	# The last number in the IP of the first node in the range (assuming all IP are in sequence).
 declare num_of_nodes=3
 
 # Variables default defenition for the configuration.
